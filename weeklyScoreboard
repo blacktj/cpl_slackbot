@@ -1,0 +1,59 @@
+from bs4 import BeautifulSoup
+from yahoo_oauth import OAuth2
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+scoreboard = '---'
+transactions = '---'
+teams = '---'
+
+scope = ['https://spreadsheets.google.com/feeds',
+         'https://www.googleapis.com/auth/drive']
+creds = ServiceAccountCredentials.from_json_keyfile_name('projecteditor.json', scope)
+client = gspread.authorize(creds)
+
+sheet = client.open("cplStorage")
+weeklyData = sheet.worksheet('weeklyData')
+
+oauth = OAuth2(None, None, from_file='yahoocreds.json')
+
+team_data = oauth.session.get(scoreboard)
+soup = BeautifulSoup(team_data.text, 'xml')
+content = soup.find_all('matchup')
+
+list_rows = []
+for row in soup.find_all('team_stats'):
+    list_rows.append(row.get_text(strip=True, separator='|').split('|'))
+
+list_upd = []
+cell_range = range(0,15)
+
+for i in list_rows:
+    temp = i[:]
+    del temp[::2]
+    list_upd.append(temp)
+
+list_final = []
+for row in list_upd:
+    temp = row[:]
+    for i in cell_range:
+        if i != 1:
+            temp[i] = float(temp[i])
+            if i == 14:
+                list_final.append(temp)
+            else:
+                next
+        else:
+            atbat = temp[i].split('/')
+
+teams = []
+for row in soup.find_all('name'):
+    teams.append(row.get_text(strip=True, separator='|').split('|'))
+
+record_val=len(weeklyData.col_values(1))
+
+tempAll = []
+for i in range(0,len(teams)-1):
+    record_val += 1
+    tempAll = [record_val] + [2019] + teams[i+1] + list_final[i]
+    weeklyData.append_row(tempAll)
