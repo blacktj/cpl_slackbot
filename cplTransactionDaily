@@ -1,0 +1,127 @@
+from bs4 import BeautifulSoup
+from oauth2client.service_account import ServiceAccountCredentials
+from yahoo_oauth import OAuth2
+from datetime import date, timedelta
+
+import gspread
+import smtplib
+import time
+
+oauth = OAuth2(None, None, from_file='yahoocreds.json')
+
+league_id = 
+sport_id = 
+
+scoreboard = 'https://fantasysports.yahooapis.com/fantasy/v2/league/XXX/scoreboard'
+transactions = 'https://fantasysports.yahooapis.com/fantasy/v2/league/XXX/transactions'
+teams = 'https://fantasysports.yahooapis.com/fantasy/v2/league/XXX/teams'
+
+scope = ['https://spreadsheets.google.com/feeds',
+         'https://www.googleapis.com/auth/drive']
+creds = ServiceAccountCredentials.from_json_keyfile_name('projecteditor.json', scope)
+client = gspread.authorize(creds)
+
+sheet = client.open("")
+farmSheet = sheet.worksheet("")
+
+gmail_user = 'XXX@gmail.com'
+gmail_password = 'XXXXXX'
+
+upd_time = date.today().strftime("%Y-%m-%d")
+yesterday = date.today() - timedelta(1)
+
+def remove_non_ascii_1(text):
+    return ''.join([i if ord(i) < 128 else ' ' for i in text])
+
+def find_player_name(name):
+    nameReturn = farmSheet.find(name)
+    return farmSheet.cell(nameReturn.row, 10).value
+
+def find_player_level(name):
+    cell = farmSheet.find(name)
+    return farmSheet.cell(cell.row, 17).value
+
+def list_to_string(list):
+    x = ', '.join(list)
+    return x
+
+transaction_data = oauth.session.get(transactions)
+soup = BeautifulSoup(transaction_data.text, 'xml')
+
+timestamps = []
+for row in soup.find_all('timestamp'):
+    temp = row.get_text(strip=True, separator='|').split('|')
+    for i in range(0,len(temp)):
+        temp[i] = time.strftime('%Y-%m-%d', time.localtime(int(temp[i])))
+        timestamps.append(temp)
+        timestamps.append(temp)
+
+all_players = []
+for row in soup.find_all('transaction'):
+    all_players.append(row.get_text(strip=True, separator='|').split('|'))
+
+
+yesterday_players = []
+for row in all_players:
+    if row[2] == 'add/drop' or row[2] == 'add':
+        temp = row[:]
+        temp2 = []
+        for i in range(0, len(temp)):
+            if i == 2 or i == 3 or i == 7 or i == 19 or i == 22:
+                temp2.append(temp[i])
+            elif i == 4:
+                temp2.append(time.strftime('%Y-%m-%d', time.localtime(int(temp[i]))))
+            elif i == len(temp)-1:
+                if temp2[2] == yesterday:
+                    yesterday_players.append(temp2)
+                else:
+                    next
+            else:
+                next
+
+yesterday_list = [item[3] for item in yesterday_players]
+
+yesterday_fa = []
+yesterday_farm = []
+yesterday_farm_issues = []
+for name in yesterday_list:
+    try:
+        find_player_name(name)
+        if find_player_level(name) == 'Farm':
+            yesterday_farm_issues.append(remove_non_ascii_1(name))
+        elif find_player_level(name) == 'CPL':
+            yesterday_farm.append(remove_non_ascii_1(name))
+    except:
+        yesterday_fa.append(remove_non_ascii_1(name))
+
+count_fa = len(yesterday_fa)
+count_farm_acq = len(yesterday_farm)
+count_farm_issues = len(yesterday_farm_issues)
+
+yesterday_fa_string = list_to_string(yesterday_fa)
+yesterday_farm_string = list_to_string(yesterday_farm)
+yesterday_farm_issues_string = list_to_string(yesterday_farm_issues)
+
+sent_from = gmail_user
+to = ['list of emails']
+subject = 'Test - Daily Free Agent Review: ' + upd_time
+fa_all_text = 'Free Agent Acquisitions (All): ' + str(len(yesterday_list)) + '\r\n'
+fa_text = '\r\nFree Agent Acquisitions (Non-Farm): ' + str(count_fa)  + '\r\nYesterday Adds: ' + yesterday_fa_string + '\r\n'
+farm_text = '\r\nFarm Player Acquisitions (CPL-level): ' + str(count_farm_acq) + '\r\nYesterday Adds: ' + yesterday_farm_string + '\r\n'
+issues_text = '\r\nFarm Eligible Acquisitions: ' + str(count_farm_issues) + '\r\nYesterday Adds: ' + yesterday_farm_issues_string + '\r\n'
+
+# make up message
+text = fa_all_text + fa_text + farm_text + issues_text
+
+
+email_text = 'Subject: {}\n\n{}'.format(subject, text)
+
+try:
+    server = smtplib.SMTP("smtp.gmail.com:587")
+    server.starttls()
+    server.login(gmail_user, gmail_password)
+    server.sendmail(sent_from, to, email_text)
+    server.close()
+    print('Email sent!')
+except:
+    print('Something went wrong...')
