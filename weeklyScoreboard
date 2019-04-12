@@ -7,53 +7,162 @@ scoreboard = '---'
 transactions = '---'
 teams = '---'
 
-scope = ['https://spreadsheets.google.com/feeds',
-         'https://www.googleapis.com/auth/drive']
-creds = ServiceAccountCredentials.from_json_keyfile_name('projecteditor.json', scope)
-client = gspread.authorize(creds)
+def list_to_string(list):
+    x = ', '.join(list)
+    return x
 
-sheet = client.open("cplStorage")
-weeklyData = sheet.worksheet('weeklyData')
+def clean_xml(data):
+    x = data.get_text(strip=True, separator='|').split('|')
+    return x
 
-oauth = OAuth2(None, None, from_file='yahoocreds.json')
+today = datetime.datetime.today().weekday()
 
-team_data = oauth.session.get(scoreboard)
-soup = BeautifulSoup(team_data.text, 'xml')
-content = soup.find_all('matchup')
+if today == 0:
+    print('Weekly Process Required.')
+    oauth = OAuth2(None, None, from_file='yahoocreds.json')
+    check_week = 'https://fantasysports.yahooapis.com/fantasy/v2/league/---/scoreboard'
+    week_pull = oauth.session.get(scoreboard)
+    soup = BeautifulSoup(week_pull.text, 'xml')
+    current_week = int(list_to_string(clean_xml(soup.find('current_week'))))
+    last_week = current_week - 1
+    last_link = scoreboard + str(last_week)
+    print(last_link)
 
-list_rows = []
-for row in soup.find_all('team_stats'):
-    list_rows.append(row.get_text(strip=True, separator='|').split('|'))
+    team_data = oauth.session.get(last_link)
+    soup = BeautifulSoup(team_data.text, 'xml')
 
-list_upd = []
-cell_range = range(0,15)
+    list_rows = []
+    for row in soup.find_all('team_stats'):
+        list_rows.append(clean_xml(row))
+    list_teams = []
+    for row in soup.find_all('name'):
+        list_teams.append(clean_xml(row))
 
-for i in list_rows:
-    temp = i[:]
-    del temp[::2]
-    list_upd.append(temp)
+    flat_list = [item for sublist in list_teams for item in sublist]
 
-list_final = []
-for row in list_upd:
-    temp = row[:]
-    for i in cell_range:
-        if i != 1:
-            temp[i] = float(temp[i])
-            if i == 14:
-                list_final.append(temp)
-            else:
-                next
+    list_upd = []
+    temp = []
+    counter = 1
+    for row in list_rows:
+        temp = row[:]
+        temp.append(flat_list[counter])
+        if counter % 2 == 0:
+            temp.append(teams[counter][0])
+            temp.append(teams[counter - 1][0])
         else:
-            atbat = temp[i].split('/')
+            temp.append(teams[counter][0])
+            temp.append(teams[counter + 1][0])
+        counter += 1
+        for i in range(0,30):
+            if i == 0:
+                #char
+                next
+            elif i == 3:
+                #at bats
+                temp.append(int(temp[i].split('/')[0]))
+                temp.append(int(temp[i].split('/')[1]))
+                next
+            elif i == 13 or i == 15 or i == 17 or i == 23 or i ==25:
+                #float
+                temp[i] = float(row[i])
+                next
+            elif i ==29:
+                temp[i] = int(row[i])
+                list_upd.append(temp)
+            elif i % 2 == 0:
+                next
+            else:
+                temp[i] = int(row[i])
 
-teams = []
-for row in soup.find_all('name'):
-    teams.append(row.get_text(strip=True, separator='|').split('|'))
+    list_final = []
+    temp_final = []
+    list_hab = []
+    counter = 1
+    for row in list_upd:
+        temp = row[:]
+        final_row = [2019,temp[30],temp[1],temp[3],temp[5],temp[7],temp[9],temp[11],temp[13],temp[15],
+                     temp[17],temp[19],temp[21],temp[23],temp[25],temp[27],temp[29]]
+        final_hab = [temp[33], temp[34]]
+        counter += 1
+        list_final.append(final_row)
+        list_hab.append(final_hab)
 
-record_val=len(weeklyData.col_values(1))
+    columns_larger_win = (4,5,6,7,8,9,11,12,15,16)
+    columns_smaller_win = (13,14)
 
-tempAll = []
-for i in range(0,len(teams)-1):
-    record_val += 1
-    tempAll = [record_val] + [2019] + teams[i+1] + list_final[i]
-    weeklyData.append_row(tempAll)
+    counter = 1
+    weekly_list_update = []
+
+    for row in list_final:
+        if counter == (len(list_final) + 1):
+            break
+        else:
+            wins = 0
+            losses = 0
+            ties = 0
+            for i in columns_larger_win:
+                if counter % 2 != 0:
+                    if list_final[counter - 1][i] > list_final[counter][i]:
+                        wins += 1
+                    elif list_final[counter - 1][i] == list_final[counter][i]:
+                        ties += 1
+                    else:
+                        losses += 1
+                else:
+                    if list_final[counter - 1][i] > list_final[counter - 2][i]:
+                        wins += 1
+                    elif list_final[counter - 1][i] == list_final[counter - 2][i]:
+                        ties += 1
+                    else:
+                        losses += 1
+            for j in columns_smaller_win:
+                if counter % 2 != 0:
+                    if list_final[counter - 1][j] < list_final[counter][j]:
+                        wins += 1
+                    elif list_final[counter - 1][j] == list_final[counter][j]:
+                        ties += 1
+                    else:
+                        losses += 1
+                else:
+                    if list_final[counter - 1][j] < list_final[counter - 2][j]:
+                        wins += 1
+                    elif list_final[counter - 1][j] == list_final[counter - 2][j]:
+                        ties += 1
+                    else:
+                        losses += 1
+            counter += 1
+            if wins > losses:
+                winner = 'Yes'
+            elif wins == losses:
+                winner = 'Tie'
+            else:
+                winner = 'No'
+
+            weekly_list_update.append([wins,losses,ties,winner, 'TBD', 'Yes', 'Yes'])
+
+    row_reference = weeklyData.cell(1,2).value
+    row_number = str(row_reference)
+
+    update_cell_reference = 'weeklyData!B' + row_number
+    print(update_cell_reference)
+    sheet.values_update(
+        update_cell_reference,
+        params={'valueInputOption': 'RAW'},
+        body={'values': list_final})
+
+    update_cell_reference = 'weeklyData!S' + row_number
+
+    sheet.values_update(
+        update_cell_reference,
+        params={'valueInputOption': 'RAW'},
+        body={'values': weekly_list_update})
+
+    update_cell_reference = 'weeklyData!AD' + row_number
+
+    sheet.values_update(
+        update_cell_reference,
+        params={'valueInputOption': 'RAW'},
+        body={'values': list_hab})
+
+else:
+    print('Weekly Update Not required.')
