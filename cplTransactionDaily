@@ -2,51 +2,128 @@ from bs4 import BeautifulSoup
 from oauth2client.service_account import ServiceAccountCredentials
 from yahoo_oauth import OAuth2
 from datetime import date, timedelta
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
+import logging
+logging.disable(logging.DEBUG)
 import gspread
 import smtplib
 import time
+import pandas as pd
+import requests
+import datetime
 
-oauth = OAuth2(None, None, from_file='yahoocreds.json')
+oauth = OAuth2(None, None, from_file='/home/blacktj15/cpl/yahoocreds.json')
 
-league_id = 
-sport_id = 
+league_id = 13262
+sport_id = 388
 
-scoreboard = 'https://fantasysports.yahooapis.com/fantasy/v2/league/XXX/scoreboard'
-transactions = 'https://fantasysports.yahooapis.com/fantasy/v2/league/XXX/transactions'
-teams = 'https://fantasysports.yahooapis.com/fantasy/v2/league/XXX/teams'
+scoreboard = 'https://fantasysports.yahooapis.com/fantasy/v2/league/388.l.13262/scoreboard'
+transactions = 'https://fantasysports.yahooapis.com/fantasy/v2/league/388.l.13262/transactions'
+teams = 'https://fantasysports.yahooapis.com/fantasy/v2/league/388.l.13262/teams'
 
 scope = ['https://spreadsheets.google.com/feeds',
          'https://www.googleapis.com/auth/drive']
 creds = ServiceAccountCredentials.from_json_keyfile_name('projecteditor.json', scope)
 client = gspread.authorize(creds)
 
-sheet = client.open("")
-farmSheet = sheet.worksheet("")
 
-gmail_user = 'XXX@gmail.com'
-gmail_password = 'XXXXXX'
+sheet = client.open("cplStorage")
+farmSheet = sheet.worksheet("farmDraft")
+weeklyData = sheet.worksheet('weeklyData')
+recordBook = client.open("CPL RecordBook 2009-Present")
+recordSheet = recordBook.worksheet('2019')
+
+gmail_user = 'theleaguereview@gmail.com'
+gmail_password = 'ejkmqtjiacbzjqfh'
 
 upd_time = date.today().strftime("%Y-%m-%d")
 yesterday = date.today() - timedelta(1)
+today_date = date.today()
+
+date_list = [str(today_date), str(yesterday)]
 
 def remove_non_ascii_1(text):
-    return ''.join([i if ord(i) < 128 else ' ' for i in text])
+    """Removes non-ascii text and returns blanks in their place."""
+    temp = []
+    counter = 0
+    for i in text:
+        if ord(i) < 128:
+            temp.append(i)
+            counter += 1
+        elif ord(i) in [232,233,234,235]:
+            temp.append('e')
+            counter += 1
+        elif ord(i) in [224,225,226,227,228,229]:
+            temp.append('a')
+            counter += 1
+        elif ord(i) in [236,237,238,239]:
+            temp.append('i')
+            counter += 1
+        elif ord(i) in [242,243,244,245,246]:
+            temp.append('o')
+            counter += 1
+        elif ord(i) == 241:
+            temp.append('n')
+            counter += 1
+        else:
+            temp.append(' ')
+            counter += 1
+    return temp
 
 def find_player_name(name):
+    """Finds the farm player's name and returns their owner in column 10 of the googlesheet."""
     nameReturn = farmSheet.find(name)
     return farmSheet.cell(nameReturn.row, 10).value
 
 def find_player_level(name):
+    """Finds the farm player's name and returns their level in column 17 of the googlesheet."""
     cell = farmSheet.find(name)
     return farmSheet.cell(cell.row, 17).value
 
 def list_to_string(list):
+    """Converts a list to a string."""
     x = ', '.join(list)
     return x
 
+def list_to_name(list):
+    """Converts a list to a string."""
+    x = ''.join(list)
+    return x
+
+def clean_xml(data):
+    x = data.get_text(strip=True, separator='|').split('|')
+    return x
+
+
 transaction_data = oauth.session.get(transactions)
 soup = BeautifulSoup(transaction_data.text, 'xml')
+
+url = "https://fantasysports.yahooapis.com/fantasy/v2/league/388.l.13262/transactions"
+
+querystring = {
+    "oauth_consumer_key":"dj0yJmk9bjdjRFI4OVVyOE5NJmQ9WVdrOWNFdFNWMFo0TkdzbWNHbzlNQS0tJnM9Y29uc3VtZXJzZWNyZXQmeD1lZQ--",
+    "oauth_signature_method":"HMAC-SHA1",
+    "oauth_timestamp":"1561727979",
+    "oauth_nonce":"E8P7sTpJHIh",
+    "oauth_version":"1.0",
+    "oauth_signature":"QiJBawsBf57hQBVcGn/GE8Zbaes="
+    }
+
+headers = {
+    'User-Agent': "PostmanRuntime/7.15.0",
+    'Accept': "*/*",
+    'Cache-Control': "no-cache",
+    'Postman-Token': "0f5f4302-b439-4d8a-ae16-26057df8b0e9,60d654dc-9388-46df-a182-9cebc11fd8fd",
+    'Host': "fantasysports.yahooapis.com",
+    'accept-encoding': "gzip, deflate",
+    'Connection': "keep-alive",
+    'cache-control': "no-cache"
+    }
+
+response = requests.request("GET", url, headers=headers, params=querystring)
+soup = BeautifulSoup(response.text, 'xml')
 
 timestamps = []
 for row in soup.find_all('timestamp'):
@@ -54,74 +131,319 @@ for row in soup.find_all('timestamp'):
     for i in range(0,len(temp)):
         temp[i] = time.strftime('%Y-%m-%d', time.localtime(int(temp[i])))
         timestamps.append(temp)
-        timestamps.append(temp)
+timestamps_flat = [item for sublist in timestamps for item in sublist]
 
 all_players = []
 for row in soup.find_all('transaction'):
     all_players.append(row.get_text(strip=True, separator='|').split('|'))
 
+df = pd.DataFrame(all_players)
+df_sliced = pd.DataFrame(df.loc[:, [2, 7,19,22]])
+df_sliced.rename(columns={2:'type', 7:'player_name', 19:'team', 22: 'drop_player'}, inplace=True)
+df_sliced['date'] = timestamps_flat
 
-yesterday_players = []
-for row in all_players:
-    if row[2] == 'add/drop' or row[2] == 'add':
-        temp = row[:]
-        temp2 = []
-        for i in range(0, len(temp)):
-            if i == 2 or i == 3 or i == 7 or i == 19 or i == 22:
-                temp2.append(temp[i])
-            elif i == 4:
-                temp2.append(time.strftime('%Y-%m-%d', time.localtime(int(temp[i]))))
-            elif i == len(temp)-1:
-                if temp2[2] == yesterday:
-                    yesterday_players.append(temp2)
-                else:
-                    next
-            else:
-                next
+df_filtered = df_sliced[df_sliced['date'].isin(date_list)]
 
-yesterday_list = [item[3] for item in yesterday_players]
-
-yesterday_fa = []
-yesterday_farm = []
-yesterday_farm_issues = []
+yesterday_list = df_filtered['player_name'].tolist()
+player_names = []
+return_values = []
+owner_names = []
 for name in yesterday_list:
     try:
-        find_player_name(name)
-        if find_player_level(name) == 'Farm':
-            yesterday_farm_issues.append(remove_non_ascii_1(name))
-        elif find_player_level(name) == 'CPL':
-            yesterday_farm.append(remove_non_ascii_1(name))
+        temp_name = list_to_name(remove_non_ascii_1(name))
+        print(temp_name)
+        find_player_name(temp_name)
+        if find_player_level(temp_name) == 'Farm':
+            return_values.append('Farm Eligible')
+            owner_names.append(find_player_name(temp_name))
+            player_names.append(temp_name)
+        elif find_player_level(temp_name) == 'Free Keeper':
+            return_values.append('Free Keeper')
+            owner_names.append(find_player_name(temp_name))
+            player_names.append(temp_name)
+        elif find_player_level(temp_name) == 'CPL':
+            return_values.append('CPL Eligible')
+            owner_names.append('CPL')
+            player_names.append(temp_name)
     except:
-        yesterday_fa.append(remove_non_ascii_1(name))
+        return_values.append('Non-Farm')
+        owner_names.append('NA')
+        player_names.append(temp_name)
 
-count_fa = len(yesterday_fa)
-count_farm_acq = len(yesterday_farm)
-count_farm_issues = len(yesterday_farm_issues)
 
-yesterday_fa_string = list_to_string(yesterday_fa)
-yesterday_farm_string = list_to_string(yesterday_farm)
-yesterday_farm_issues_string = list_to_string(yesterday_farm_issues)
+drop_names = []
+for i in df_filtered['drop_player'].tolist():
+    if i == None:
+        drop_names.append(None)
+    else:
+        drop_names.append(list_to_name(remove_non_ascii_1(i)))
+
+df_filtered['player_name'] = player_names
+df_filtered['eligibility'] = return_values
+df_filtered['owner_name'] = owner_names
+df_filtered['drop_player'] = drop_names
+
+player_name_list = df_filtered['player_name'].tolist()
+type_list = df_filtered['type'].tolist()
+drop_player_list = df_filtered['drop_player'].tolist()
+
+df_final = df_filtered[:]
+print(df_final)
+counter = 0
+for item in type_list:
+    if item == 'drop':
+        drop_player_list[counter] = player_name_list[counter]
+        player_name_list[counter] = 'None'
+        counter += 1
+    else:
+        counter += 1
+        next
+
+df_final['player_name'] = player_name_list
+df_final['drop_player'] = drop_player_list
+df_final.eligibility= pd.Categorical(df_final.eligibility,categories=['Free Keeper','Farm Eligible', 'CPL Eligible', 'Non-Farm'])
+df_final = df_final.sort_values('eligibility')
+print(df_final)
+sent_from = gmail_user
+to = ['travis.black1@gmail.com', 'danmulrine@gmail.com', 'tkanganis24@gmail.com', 'ian.mccutcheon6@gmail.com','allanlmoulds@gmail.com','mark.chando3@gmail.com','nbenvenuto3@gmail.com','pkarch09@gmail.com','keithabrahamson@gmail.com','rkavcsak@gmail.com', 'stc5009@gmail.com','steve.aponavicius@gmail.com','sar5036@gmail.com']
+subject = 'Daily Free Agent Review'
+email = "Date Range: {date1} to {date2} {df}"
+text = email.format(df=df_final.to_html(), date1 = str(yesterday), date2 = str(today_date))
+
+
+msg = MIMEMultipart('alternative')
+msg['Subject'] = subject
+msg['From'] = sent_from
+msg['To'] = list_to_string(to)
+
+part2 = MIMEText(text, 'html')
+msg.attach(part2)
+
+
+# Send the message via local SMTP server.
+s = smtplib.SMTP("smtp.gmail.com:587")
+# sendmail function takes 3 arguments: sender's address, recipient's address
+# and message to send - here it is sent as one string.
+s.starttls()
+s.login(gmail_user, gmail_password)
+s.sendmail(sent_from, to, msg.as_string())
+s.quit()
+
+today = datetime.datetime.today().weekday()
+
+if today == 0:
+    print('Weekly Process Required.')
+    oauth = OAuth2(None, None, from_file='/home/blacktj15/cpl/yahoocreds.json')
+    check_week = 'https://fantasysports.yahooapis.com/fantasy/v2/league/388.l.13262/scoreboard'
+    week_pull = oauth.session.get(check_week)
+    soup = BeautifulSoup(week_pull.text, 'xml')
+    current_week = int(list_to_string(clean_xml(soup.find('current_week'))))
+    last_week = current_week - 1
+    scoreboard = 'https://fantasysports.yahooapis.com/fantasy/v2/league/388.l.13262/scoreboard;type=matchup;week='
+    last_link = scoreboard + str(last_week)
+    print(last_link)
+
+    team_data = oauth.session.get(last_link)
+    soup = BeautifulSoup(team_data.text, 'xml')
+
+    list_rows = []
+    for row in soup.find_all('team_stats'):
+        list_rows.append(clean_xml(row))
+    list_teams = []
+    for row in soup.find_all('name'):
+        list_teams.append(clean_xml(row))
+
+    flat_list = [item for sublist in list_teams for item in sublist]
+
+    list_upd = []
+    temp = []
+    counter = 1
+    for row in list_rows:
+        temp = row[:]
+        temp.append(flat_list[counter])
+        if counter % 2 == 0:
+            temp.append(teams[counter][0])
+            temp.append(teams[counter - 1][0])
+        else:
+            temp.append(teams[counter][0])
+            temp.append(teams[counter + 1][0])
+        counter += 1
+        for i in range(0,30):
+            if i == 0:
+                #char
+                next
+            elif i == 3:
+                #at bats
+                temp.append(int(temp[i].split('/')[0]))
+                temp.append(int(temp[i].split('/')[1]))
+                next
+            elif i == 13 or i == 15 or i == 17 or i == 23 or i ==25:
+                #float
+                temp[i] = float(row[i])
+                next
+            elif i ==29:
+                temp[i] = int(row[i])
+                list_upd.append(temp)
+            elif i % 2 == 0:
+                next
+            else:
+                temp[i] = int(row[i])
+
+    list_final = []
+    temp_final = []
+    list_hab = []
+    counter = 1
+    for row in list_upd:
+        temp = row[:]
+        final_row = [2019,temp[30],temp[1],temp[3],temp[5],temp[7],temp[9],temp[11],temp[13],temp[15],
+                     temp[17],temp[19],temp[21],temp[23],temp[25],temp[27],temp[29]]
+        final_hab = [temp[33], temp[34]]
+        counter += 1
+        list_final.append(final_row)
+        list_hab.append(final_hab)
+
+    columns_larger_win = (4,5,6,7,8,9,11,12,15,16)
+    columns_smaller_win = (13,14)
+
+    counter = 1
+    weekly_list_update = []
+
+    for row in list_final:
+        if counter == (len(list_final) + 1):
+            break
+        else:
+            wins = 0
+            losses = 0
+            ties = 0
+            for i in columns_larger_win:
+                if counter % 2 != 0:
+                    if list_final[counter - 1][i] > list_final[counter][i]:
+                        wins += 1
+                    elif list_final[counter - 1][i] == list_final[counter][i]:
+                        ties += 1
+                    else:
+                        losses += 1
+                else:
+                    if list_final[counter - 1][i] > list_final[counter - 2][i]:
+                        wins += 1
+                    elif list_final[counter - 1][i] == list_final[counter - 2][i]:
+                        ties += 1
+                    else:
+                        losses += 1
+            for j in columns_smaller_win:
+                if counter % 2 != 0:
+                    if list_final[counter - 1][j] < list_final[counter][j]:
+                        wins += 1
+                    elif list_final[counter - 1][j] == list_final[counter][j]:
+                        ties += 1
+                    else:
+                        losses += 1
+                else:
+                    if list_final[counter - 1][j] < list_final[counter - 2][j]:
+                        wins += 1
+                    elif list_final[counter - 1][j] == list_final[counter - 2][j]:
+                        ties += 1
+                    else:
+                        losses += 1
+            counter += 1
+            if wins > losses:
+                winner = 'Yes'
+            elif wins == losses:
+                winner = 'Tie'
+            else:
+                winner = 'No'
+
+            weekly_list_update.append([wins,losses,ties,winner, 'TBD', 'Yes', 'Yes'])
+
+    row_reference = weeklyData.cell(1,2).value
+    row_number = str(row_reference)
+
+    update_cell_reference = 'weeklyData!B' + row_number
+    print(update_cell_reference)
+    sheet.values_update(
+        update_cell_reference,
+        params={'valueInputOption': 'RAW'},
+        body={'values': list_final})
+
+    update_cell_reference = 'weeklyData!S' + row_number
+
+    sheet.values_update(
+        update_cell_reference,
+        params={'valueInputOption': 'RAW'},
+        body={'values': weekly_list_update})
+
+    update_cell_reference = 'weeklyData!AD' + row_number
+
+    sheet.values_update(
+        update_cell_reference,
+        params={'valueInputOption': 'RAW'},
+        body={'values': list_hab})
+
+    row_reference = recordSheet.cell(1,2).value
+    row_number = str(row_reference)
+
+    update_cell_reference = '2019!B' + row_number
+    print(update_cell_reference)
+    recordBook.values_update(
+        update_cell_reference,
+        params={'valueInputOption': 'RAW'},
+        body={'values': list_final})
+
+
+    update_cell_reference = '2019!S' + row_number
+
+    recordBook.values_update(
+        update_cell_reference,
+        params={'valueInputOption': 'RAW'},
+        body={'values': weekly_list_update})
+
+    update_cell_reference = '2019!AD' + row_number
+
+    recordBook.values_update(
+        update_cell_reference,
+        params={'valueInputOption': 'RAW'},
+        body={'values': list_hab})
+
+else:
+    print('Weekly Update Not required.')
+
+
+url = 'https://baseball.fantasysports.yahoo.com/b1/buzzindex?date=' + str(yesterday) + '&pos=ALL&src=combined&bimtab=A&sort=BI_A&sdir=1'
+data = requests.get(url)
+
+content = data.text
+soup = BeautifulSoup(''.join(content), "lxml")
+
+most_added = []
+for tables in soup.find_all('tbody'):
+    for row in tables.find_all('tr'):
+        detail = (row.get_text(strip=True, separator='|').split('|'))
+        if detail[0] == 'New Player Note' or detail[0] == 'Player Note' or detail[0] == 'No new player Notes' and len(detail) > 3:
+            temp = [list_to_name(remove_non_ascii_1(detail[1])),detail[2],detail[len(detail)-4],detail[len(detail)-3],detail[len(detail)-2],detail[len(detail)-1]]
+            most_added.append(temp)
+        else:
+            next
+
+df_most_added_today = pd.DataFrame(most_added, columns = ['player_name', 'team_pos', 'drops', 'adds', 'trades', 'total_moves'])
 
 sent_from = gmail_user
-to = ['list of emails']
-subject = 'Test - Daily Free Agent Review: ' + upd_time
-fa_all_text = 'Free Agent Acquisitions (All): ' + str(len(yesterday_list)) + '\r\n'
-fa_text = '\r\nFree Agent Acquisitions (Non-Farm): ' + str(count_fa)  + '\r\nYesterday Adds: ' + yesterday_fa_string + '\r\n'
-farm_text = '\r\nFarm Player Acquisitions (CPL-level): ' + str(count_farm_acq) + '\r\nYesterday Adds: ' + yesterday_farm_string + '\r\n'
-issues_text = '\r\nFarm Eligible Acquisitions: ' + str(count_farm_issues) + '\r\nYesterday Adds: ' + yesterday_farm_issues_string + '\r\n'
+to = 'travis.black1@gmail.com'
+subject = 'Most Added Players Today'
+email = "{df}"
+text = email.format(df=df_most_added_today.to_html())
 
-# make up message
-text = fa_all_text + fa_text + farm_text + issues_text
+msg = MIMEMultipart('alternative')
+msg['Subject'] = subject
+msg['From'] = sent_from
+msg['To'] = to
+part1 = MIMEText(text, 'html')
+msg.attach(part1)
 
-
-email_text = 'Subject: {}\n\n{}'.format(subject, text)
-
-try:
-    server = smtplib.SMTP("smtp.gmail.com:587")
-    server.starttls()
-    server.login(gmail_user, gmail_password)
-    server.sendmail(sent_from, to, email_text)
-    server.close()
-    print('Email sent!')
-except:
-    print('Something went wrong...')
+# Send the message via local SMTP server.
+s = smtplib.SMTP("smtp.gmail.com:587")
+# sendmail function takes 3 arguments: sender's address, recipient's address
+# and message to send - here it is sent as one string.
+s.starttls()
+s.login(gmail_user, gmail_password)
+s.sendmail(sent_from, to, msg.as_string())
+s.quit()
