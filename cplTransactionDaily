@@ -205,7 +205,7 @@ df_final.eligibility= pd.Categorical(df_final.eligibility,categories=['Free Keep
 df_final = df_final.sort_values('eligibility')
 print(df_final)
 sent_from = gmail_user
-to = ['travis.black1@gmail.com', 'danmulrine@gmail.com', 'tkanganis24@gmail.com', 'ian.mccutcheon6@gmail.com','allanlmoulds@gmail.com','mark.chando3@gmail.com','nbenvenuto3@gmail.com','pkarch09@gmail.com','keithabrahamson@gmail.com','rkavcsak@gmail.com', 'stc5009@gmail.com','steve.aponavicius@gmail.com','sar5036@gmail.com']
+to = [--email list --]
 subject = 'Daily Free Agent Review'
 email = "Date Range: {date1} to {date2} {df}"
 text = email.format(df=df_final.to_html(), date1 = str(yesterday), date2 = str(today_date))
@@ -427,7 +427,7 @@ for tables in soup.find_all('tbody'):
 df_most_added_today = pd.DataFrame(most_added, columns = ['player_name', 'team_pos', 'drops', 'adds', 'trades', 'total_moves'])
 
 sent_from = gmail_user
-to = 'travis.black1@gmail.com'
+to = [--email list --]
 subject = 'Most Added Players Today'
 email = "{df}"
 text = email.format(df=df_most_added_today.to_html())
